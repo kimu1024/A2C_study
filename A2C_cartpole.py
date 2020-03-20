@@ -10,7 +10,7 @@ GAMMA = 0.99  # 時間割引率
 MAX_STEPS = 200  # 1試行のstep数
 NUM_EPISODES = 1000  # 最大試行回数
 
-NUM_PROCESSES = 32  # 同時に実行する環境
+NUM_PROCESSES = 16  # 同時に実行する環境
 NUM_ADVANCED_STEP = 5  # 何ステップ進めて報酬和を計算するのか設定
 
 # A2Cの損失関数の計算のための定数設定
@@ -53,8 +53,7 @@ class RolloutStorage(object):
         # 注意：5step目はAdvantage1となる。4ステップ目はAdvantage2となる。・・・
         self.returns[-1] = next_value
         for ad_step in reversed(range(self.rewards.size(0))):
-            self.returns[ad_step] = self.returns[ad_step + 1] * \
-                                    GAMMA * self.masks[ad_step + 1] + self.rewards[ad_step]
+            self.returns[ad_step] = self.returns[ad_step + 1] * GAMMA * self.masks[ad_step + 1] + self.rewards[ad_step]
 
 
 class Net(nn.Module):
@@ -81,6 +80,7 @@ class Net(nn.Module):
         # dim=1で行動の種類方向にsoftmaxを計算
         action_probs = F.softmax(actor_output, dim=1)
         action = action_probs.multinomial(num_samples=1)  # dim=1で行動の種類方向に確率計算
+        print('action_probs,action', action_probs[0], action[0])
         return action
 
     def get_value(self, x):
@@ -124,7 +124,6 @@ class Brain(object):
         values, action_log_probs, entropy = self.actor_critic.evaluate_actions(
             rollouts.observations[:-1].view(-1, 4),
             rollouts.actions.view(-1, 1))
-
         # 注意：各変数のサイズ
         # rollouts.observations[:-1].view(-1, 4) torch.Size([80, 4])
         # rollouts.actions.view(-1, 1) torch.Size([80, 1])
@@ -215,8 +214,7 @@ class Environment:
 
                 # 1stepの実行
                 for i in range(NUM_PROCESSES):
-                    obs_np[i], reward_np[i], done_np[i], _ = envs[i].step(
-                        actions[i])
+                    obs_np[i], reward_np[i], done_np[i], _ = envs[i].step(actions[i])
 
                     # episodeの終了評価と、state_nextを設定
                     if done_np[i]:  # ステップ数が200経過するか、一定角度以上傾くとdoneはtrueになる
@@ -245,8 +243,7 @@ class Environment:
                 episode_rewards += reward
 
                 # 各実行環境それぞれについて、doneならmaskは0に、継続中ならmaskは1にする
-                masks = torch.FloatTensor(
-                    [[0.0] if done_ else [1.0] for done_ in done_np])
+                masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done_np])
 
                 # 最後の試行の総報酬を更新する
                 final_rewards *= masks  # 継続中の場合は1をかけ算してそのまま、done時には0を掛けてリセット
@@ -271,8 +268,7 @@ class Environment:
             # advancedした最終stepの状態から予想する状態価値を計算
 
             with torch.no_grad():
-                next_value = actor_critic.get_value(
-                    rollouts.observations[-1]).detach()
+                next_value = actor_critic.get_value(rollouts.observations[-1]).detach()
                 # rollouts.observationsのサイズはtorch.Size([6, 16, 4])
 
             # 全stepの割引報酬和を計算して、rolloutsの変数returnsを更新
