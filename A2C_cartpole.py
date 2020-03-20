@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import gym
 import torch.nn as nn
 import torch.nn.functional as F
+# エージェントが持つ頭脳となるクラスを定義、全エージェントで共有する
+import torch
+from torch import optim
 
 # 定数の設定
 ENV = 'CartPole-v0'  # 使用する課題名
@@ -19,17 +22,22 @@ entropy_coef = 0.01
 max_grad_norm = 0.5
 
 
+use_cuda = torch.cuda.is_available()
+device = torch.device("cuda" if use_cuda else "cpu")
+print(device)
+
+
 class RolloutStorage(object):
     '''Advantage学習するためのメモリクラスです'''
 
     def __init__(self, num_steps, num_processes, obs_shape):
-        self.observations = torch.zeros(num_steps + 1, num_processes, 4)
-        self.masks = torch.ones(num_steps + 1, num_processes, 1)
-        self.rewards = torch.zeros(num_steps, num_processes, 1)
-        self.actions = torch.zeros(num_steps, num_processes, 1).long()
+        self.observations = torch.zeros(num_steps + 1, num_processes, 4).to(device)
+        self.masks = torch.ones(num_steps + 1, num_processes, 1).to(device)
+        self.rewards = torch.zeros(num_steps, num_processes, 1).to(device)
+        self.actions = torch.zeros(num_steps, num_processes, 1).long().to(device)
 
         # 割引報酬和を格納
-        self.returns = torch.zeros(num_steps + 1, num_processes, 1)
+        self.returns = torch.zeros(num_steps + 1, num_processes, 1).to(device)
         self.index = 0  # insertするインデックス
 
     def insert(self, current_obs, action, reward, mask):
@@ -80,7 +88,6 @@ class Net(nn.Module):
         # dim=1で行動の種類方向にsoftmaxを計算
         action_probs = F.softmax(actor_output, dim=1)
         action = action_probs.multinomial(num_samples=1)  # dim=1で行動の種類方向に確率計算
-        print('action_probs,action', action_probs[0], action[0])
         return action
 
     def get_value(self, x):
@@ -105,9 +112,7 @@ class Net(nn.Module):
         return value, action_log_probs, entropy
 
 
-# エージェントが持つ頭脳となるクラスを定義、全エージェントで共有する
-import torch
-from torch import optim
+
 
 
 class Brain(object):
@@ -174,7 +179,7 @@ class Environment:
         n_in = envs[0].observation_space.shape[0]  # 状態は4
         n_out = envs[0].action_space.n  # 行動は2
         n_mid = 32
-        actor_critic = Net(n_in, n_mid, n_out)  # ディープ・ニューラルネットワークの生成
+        actor_critic = Net(n_in, n_mid, n_out).to(device)  # ディープ・ニューラルネットワークの生成
         global_brain = Brain(actor_critic)
 
         # 格納用変数の生成
@@ -210,7 +215,7 @@ class Environment:
                     action = actor_critic.act(rollouts.observations[step])
 
                 # (16,1)→(16,)→tensorをNumPyに
-                actions = action.squeeze(1).numpy()
+                actions = action.squeeze(1).cpu().numpy()
 
                 # 1stepの実行
                 for i in range(NUM_PROCESSES):
@@ -284,6 +289,5 @@ class Environment:
                 break
 
 
-# main学習
 cartpole_env = Environment()
 cartpole_env.run()
